@@ -22,6 +22,9 @@ void Action::addBehavior(Behavior* b)
 {
 	history->addBehavior(b);
 }
+
+Behavior* Action::sampleBehaviorUniformly() const {return history->sampleBehaviorUniformly();}
+
 /*
 void Action::rw_serial(vector<vector<int> >& corpus, int max_len, int delta) const
 {

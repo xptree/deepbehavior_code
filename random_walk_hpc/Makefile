@@ -1,6 +1,6 @@
 CC=g++
-CFLAGS= -O0 -g -Wall -std=c++11 -fopenmp  -I/home/jiezhong/local/include
-LDFLAGS= -O0 -Wall -std=c++11 -fopenmp -llog4cpp -L/home/jiezhong/local/lib
+CFLAGS= -O3 -g -Wall -std=c++11 -fopenmp  -I/home/jiezhong/local/include
+LDFLAGS= -O3 -Wall -std=c++11 -fopenmp -llog4cpp -L/home/jiezhong/local/lib
 EXEC=main
 OBJ= Entity.o Action.o Behavior.o History.o Util.o Graph.o main.o Parameter.o
 

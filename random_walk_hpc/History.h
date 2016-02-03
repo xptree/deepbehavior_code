@@ -11,6 +11,7 @@ public:
 	void preprocess(double time_const);
 	pair<double, double> getWeight(int t) const;
 	Behavior* sampleBehavior(int t, double time_const) const;
+	Behavior* sampleBehaviorUniformly() const;
 	void addBehavior(Behavior* b);
 private:
 	vector<Behavior*> h;

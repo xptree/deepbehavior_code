@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cmath>
 #include <map>
+#include <cstdlib>
 #include "log4cpp/Category.hh"
 #include "log4cpp/OstreamAppender.hh"
 #include "log4cpp/FileAppender.hh"
@@ -15,6 +16,12 @@ History::~History() {}
 
 void History::addBehavior(Behavior* b) {
 	h.push_back(b);
+}
+
+
+Behavior* History::sampleBehaviorUniformly() const {
+	if (h.empty()) return NULL;
+	return h[rand() % h.size()];
 }
 
 void History::preprocess(double time_const) {

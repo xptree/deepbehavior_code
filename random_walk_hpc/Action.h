@@ -17,6 +17,7 @@ public:
 	~Action();
 	void addActionRelationship(Action*, double);
 	void addBehavior(Behavior*);
+	Behavior* sampleBehaviorUniformly() const;
 	//void rw_serial(vector<vector<int> >& corpus, int max_len) const;
 	Action* sampleActionFromNeighbor(int t, double time_const, double relation_const) const;
 	Behavior* sampleBehaviorFromHistory(int t, double time_const) const;

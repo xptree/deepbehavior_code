@@ -103,7 +103,7 @@ void Graph::rw_serial(vector<vector<int> >& corpus, Parameter* para) const
 	for (size_t i=0; i<entity.size(); ++i) {
 		Entity* e = entity[i];
 		if (e==NULL) continue;
-		for (int w=0; w<para->num_walks; ++w) {
+		for (int w=0; w<para->num_walks_entity; ++w) {
 			Behavior* b = e->sampleBehaviorUniformly();
 			if (b==NULL) continue;
 			vector<int> sentence;
@@ -123,7 +123,7 @@ void Graph::rw_serial(vector<vector<int> >& corpus, Parameter* para) const
 	for (size_t i=0; i<action.size(); ++i) {
 		Action* a = action[i];
 		if (a==NULL) continue;
-		for (int w=0; w<para->num_walks; ++w) {
+		for (int w=0; w<para->num_walks_action; ++w) {
 			Behavior* b = a->sampleBehaviorUniformly();
 			if (b==NULL) continue;
 			vector<int> sentence;
@@ -180,7 +180,7 @@ void Graph::rw_parallel(vector<vector<int> >& corpus, Parameter* para) const
 		for (size_t i=0; i<entity.size(); ++i) {
 			Entity* e = entity[i];
 			if (e==NULL) continue;
-			for (int w=0; w<para->num_walks; ++w) {
+			for (int w=0; w<para->num_walks_entity; ++w) {
 				Behavior* b = e->sampleBehaviorUniformly();
 				if (b==NULL) continue;
 				vector<int> sentence;
@@ -208,7 +208,7 @@ void Graph::rw_parallel(vector<vector<int> >& corpus, Parameter* para) const
 		for (size_t i=0; i<action.size(); ++i) {
 			Action* a = action[i];
 			if (a==NULL) continue;
-			for (int w=0; w<para->num_walks; ++w) {
+			for (int w=0; w<para->num_walks_action; ++w) {
 				Behavior* b = a->sampleBehaviorUniformly();
 				if (b==NULL) continue;
 				vector<int> sentence;

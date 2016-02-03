@@ -20,7 +20,8 @@ public:
 	double neighbor_action;
 	double self_action;
 
-	int num_walks;
+	int num_walks_entity;
+	int num_walks_action;
 	int walk_length;
 	int num_threads;
 

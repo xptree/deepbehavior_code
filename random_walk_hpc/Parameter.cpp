@@ -42,7 +42,8 @@ void Parameter::parse(int argc, char** argv) {
 	if ((i = argPos((char *)"-neighbor_action", argc, argv)) > 0) neighbor_action = atof(argv[i + 1]);
 	if ((i = argPos((char *)"-self_action", argc, argv)) > 0) self_action = atof(argv[i + 1]);
 
-	if ((i = argPos((char *)"-num_walks", argc, argv)) > 0) num_walks = atoi(argv[i + 1]);
+	if ((i = argPos((char *)"-num_walks_entity", argc, argv)) > 0) num_walks_entity = atoi(argv[i + 1]);
+	if ((i = argPos((char *)"-num_walks_action", argc, argv)) > 0) num_walks_action = atoi(argv[i + 1]);
 	if ((i = argPos((char *)"-walk_length", argc, argv)) > 0) walk_length = atoi(argv[i + 1]);
 	if ((i = argPos((char *)"-num_threads", argc, argv)) > 0) num_threads = atoi(argv[i + 1]);
 
@@ -65,7 +66,7 @@ void Parameter::setDefault() {
 	neighbor_action = 0.25;
 	self_action = 0.25;
 
-	num_walks = 10;
+	num_walks_entity = num_walks_action = 10;
 	walk_length = 40;
 	num_threads = 32;
 

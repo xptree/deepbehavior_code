@@ -39,7 +39,7 @@ Graph* buildGraph(Parameter* para)
 				buffer[len-1] = '\0';
 			vector<string> elems = Util::split(buffer, '\t');
 			int user             = atoi(elems[0].c_str());
-			int timestamp        = atoi(elems[1].c_str()) - 2005;
+			int timestamp        = atoi(elems[1].c_str()) - 4;
 			int action           = atoi(elems[2].c_str());
 			g->addBehavior(user, timestamp, action);
 		}
@@ -79,7 +79,7 @@ Graph* buildGraph(Parameter* para)
 			size_t len = strlen(buffer);
 			loaded_bytes += len * sizeof(char);
 			if (loaded_bytes / double(action_file_size+1) * 100 >= last) {
-				//infoCategory.info("%d%% loaded ...", int(loadedBytes / double(userFileSize) * 100));
+				logger.info("%d%% loaded ...", int(loaded_bytes / double(action_file_size) * 100));
 				last += 10;
 			}
 			if (len>0 && buffer[len-1]=='\n')
@@ -87,11 +87,12 @@ Graph* buildGraph(Parameter* para)
 			vector<string> elems = Util::split(buffer, '\t');
 			int u                = atoi(elems[0].c_str());
 			int v                = atoi(elems[1].c_str());
-			double w                = atof(elems[2].c_str());
+			double w                = elems.size()>=3 ? atof(elems[2].c_str()) : 1.0;
 			g->addActionRelationship(u, v, w);
 		}
 		fclose(stdin);
 	}
+	logger.info("load data completed");
 	g->preprocess(para);
 	return g;
 }

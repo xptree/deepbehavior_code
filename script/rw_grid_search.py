@@ -9,19 +9,21 @@ import os
 import subprocess
 
 def searchPathWeight():
-    work_dir="/home/jiezhong/embedding/src/deepbehavior_code/random_walk_hpc"
-    entity_file="/home/jiezhong/embedding/data/paper_edge.txt"
-    action_file="/home/jiezhong/embedding/data/paper_action_edge.txt"
-    behavior_file="/home/jiezhong/embedding/data/paper_history.txt"
-    output_dir="/home/jiezhong/embedding/src/deepbehavior_code/result/random_walk_hpc"
-    script_dir="/home/jiezhong/embedding/src/deepbehavior_code/script/"
-    num_threads=32
+    work_dir="/home/shawn/lab/Tencent/dnf/deepbehavior_code/random_walk_hpc"
+    action_file="/home/shawn/lab/Tencent/dnf/deepbehavior_code/data/output_items_link.txt"
+    entity_file="/home/shawn/lab/Tencent/dnf/deepbehavior_code/data/user_link.txt_tab.0"
+    behavior_file="/home/shawn/lab/Tencent/dnf/deepbehavior_code/data/log_reduced_ord.txt"
+    output_dir="/home/shawn/lab/Tencent/dnf/deepbehavior_code/result/random_walk_hpc"
+    script_dir="/home/shawn/lab/Tencent/dnf/deepbehavior_code/script/"
+    num_threads=60
 
     neighbor_entity = [i for i in xrange(1, 10)]
+    neighbor_entity = [5]
     self_entity = [i for i in xrange(1, 10)]
-    neigbor_action = [0]
+    self_entity = [1]
+    neigbor_action = [1]
     self_action = [i for i in xrange(1, 10)]
-
+    self_action = [3]
     for ne in neighbor_entity:
         for se in self_entity:
             for na in neigbor_action:
@@ -31,6 +33,7 @@ def searchPathWeight():
                         scriput_file = os.path.join(script_dir, "run_rw.sh")
                         args = [scriput_file, work_dir, entity_file, action_file, behavior_file, \
                                     str(ne/10.), str(se/10.), str(na/10.), str(sa/10.), str(num_threads), output_file, "1", "1"]
+                        print args
                         subprocess.call(args)
 
 def searchTimeConst():
@@ -60,5 +63,5 @@ def searchTimeConst():
 
 
 if __name__ == "__main__":
-    #searchPathWeight()
-    searchTimeConst()
+    searchPathWeight()
+    #searchTimeConst()

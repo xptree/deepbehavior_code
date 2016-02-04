@@ -19,8 +19,8 @@ entity_time_const=${11}
 action_time_const=${12}
 
 
-$work_dir/main -entity_file $entity_file -behavior_file $behavior_file \
-	-num_walks_entity 10 -num_walks_action 200 -walk_length 40 -num_threads $num_threads \
+$work_dir/main -entity_file $entity_file -behavior_file $behavior_file -action_file $action_file \
+	-num_walks_entity 10 -num_walks_action 10 -walk_length 40 -num_threads $num_threads \
 	-entity_time_const $entity_time_const -action_time_const $action_time_const -entity_relation_const 1 -action_relation_const 1 \
 	-neighbor_entity $neighbor_entity -self_entity $self_entity -neighbor_action $neighbor_action -self_action $self_action \
 	-output_file $output_file

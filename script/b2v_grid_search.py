@@ -10,17 +10,21 @@ import subprocess
 
 
 def searchPathWeight():
-    work_dir="/home/jiezhong/embedding/src/deepbehavior_code/behavior2vec"
-    train_dir="/home/jiezhong/embedding/src/deepbehavior_code/result/random_walk_hpc/"
-    output_dir="/home/jiezhong/embedding/src/deepbehavior_code/result/behavior2vec/"
-    script_dir="/home/jiezhong/embedding/src/deepbehavior_code/script/"
-    num_threads=32
+    work_dir="/home/shawn/lab/Tencent/dnf/deepbehavior_code/behavior2vec"
+    train_dir="/home/shawn/lab/Tencent/dnf/deepbehavior_code/result/random_walk_hpc/"
+    output_dir="/home/shawn/lab/Tencent/dnf/deepbehavior_code/result/behavior2vec/"
+    script_dir="/home/shawn/lab/Tencent/dnf/deepbehavior_code/script/"
+    num_threads=60
     num_iter=10
 
     neighbor_entity = [i for i in xrange(1, 10)]
+    neighbor_entity = [5]
     self_entity = [i for i in xrange(1, 10)]
+    self_entity = [1]
     neigbor_action = [0]
+    neigbor_action = [1]
     self_action = [i for i in xrange(1, 10)]
+    self_action = [3]
 
     for ne in neighbor_entity:
         for se in self_entity:
@@ -36,10 +40,10 @@ def searchPathWeight():
                         subprocess.call(args)
 
 def searchTimeConst():
-    work_dir="/home/jiezhong/embedding/src/deepbehavior_code/behavior2vec"
-    train_dir="/home/jiezhong/embedding/src/deepbehavior_code/result/random_walk_hpc/"
-    output_dir="/home/jiezhong/embedding/src/deepbehavior_code/result/behavior2vec/"
-    script_dir="/home/jiezhong/embedding/src/deepbehavior_code/script/"
+    work_dir="/home/shawn/lab/Tencent/dnf/deepbehavior_code/behavior2vec"
+    train_dir="/home/shawn/lab/Tencent/dnf/deepbehavior_code/result/random_walk_hpc/"
+    output_dir="/home/shawn/lab/Tencent/dnf/deepbehavior_code/result/behavior2vec/"
+    script_dir="/home/shawn/lab/Tencent/dnf/deepbehavior_code/script/"
     num_threads=30
     num_iter=30
 
@@ -58,5 +62,5 @@ def searchTimeConst():
             subprocess.call(args)
 
 if __name__ == "__main__":
-    #searchPathWeight()
-    searchTimeConst()
+    searchPathWeight()
+    #searchTimeConst()

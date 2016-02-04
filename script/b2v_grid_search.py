@@ -40,8 +40,8 @@ def searchTimeConst():
     train_dir="/home/jiezhong/embedding/src/deepbehavior_code/result/random_walk_hpc/"
     output_dir="/home/jiezhong/embedding/src/deepbehavior_code/result/behavior2vec/"
     script_dir="/home/jiezhong/embedding/src/deepbehavior_code/script/"
-    num_threads=30
-    num_iter=30
+    num_threads=28
+    num_iter=100
 
     entity_time_const = [0.5, 1, 2, 3, 4, 5]
     action_time_const = [0.5, 1, 2, 3, 4, 5]

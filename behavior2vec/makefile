@@ -1,4 +1,4 @@
-CC = gcc
+CC = icc
 #Using -Ofast instead of -O3 might result in faster code, but is supported only by newer GCC versions
 CFLAGS = -lm -pthread -g -march=native -Wall -funroll-loops -Wno-unused-result -O3
 

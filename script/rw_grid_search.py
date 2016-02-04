@@ -40,7 +40,7 @@ def searchTimeConst():
     behavior_file="/home/jiezhong/embedding/data/paper_history.txt"
     output_dir="/home/jiezhong/embedding/src/deepbehavior_code/result/random_walk_hpc"
     script_dir="/home/jiezhong/embedding/src/deepbehavior_code/script/"
-    num_threads=32
+    num_threads=28
     ne = 6
     se = 3
     na = 0

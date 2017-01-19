@@ -192,6 +192,7 @@ void Graph::rw_parallel(vector<vector<int> >& corpus, Parameter* para) const
 					if (b==NULL) break;
 					sentence.push_back(b->entity()->getId());
 					sentence.push_back(b->action()->getId());
+					sentence.push_back(b->time());
 				}
 				local_corpus_entity.push_back(sentence);
 			}
@@ -220,6 +221,7 @@ void Graph::rw_parallel(vector<vector<int> >& corpus, Parameter* para) const
 					if (b==NULL) break;
 					sentence.push_back(b->entity()->getId());
 					sentence.push_back(b->action()->getId());
+					sentence.push_back(b->time());
 				}
 				local_corpus_action.push_back(sentence);
 			}

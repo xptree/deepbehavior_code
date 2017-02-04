@@ -1,8 +1,8 @@
-CC = icc
+CC = /usr/local/bin/gcc-6
 #Using -Ofast instead of -O3 might result in faster code, but is supported only by newer GCC versions
 CFLAGS = -lm -pthread -g -march=native -Wall -funroll-loops -Wno-unused-result -O3
 
-all: word2vec, deepbehavior 
+all: main
 #word2phrase distance word-analogy compute-accuracy
 
 word2vec : word2vec.c
@@ -23,5 +23,5 @@ deepbehavior: deepbehavior.c
 #	chmod +x *.sh
 
 clean:
-	rm -rf word2vec deepbehavior 
+	rm -rf main
 #word2phrase distance word-analogy compute-accuracy

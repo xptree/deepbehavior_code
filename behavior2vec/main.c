@@ -17,6 +17,7 @@
 #include <string.h>
 #include <math.h>
 #include <pthread.h>
+#include <stdint.h>
 
 #define MAX_STRING 1000
 #define EXP_TABLE_SIZE 1000
@@ -38,19 +39,25 @@ struct vocab_word {
 };
 
 char train_file[MAX_STRING], output_file_entity[MAX_STRING], output_file_action[MAX_STRING];
+char output_file_action_time[MAX_STRING], output_file_entity_time[MAX_STRING];
 char save_vocab_file[MAX_STRING], read_vocab_file[MAX_STRING];
-struct vocab_word *vocab_entity, *vocab_action;
-int binary = 0, cbow = 1, debug_mode = 2, window = 5, min_count = 5, num_threads = 12, min_reduce_entity = 1, min_redue_action = 1;
+struct vocab_word *vocab_entity = NULL, *vocab_action = NULL;
+int binary = 0, cbow = 0, debug_mode = 2, window = 5, min_count = 5, num_threads = 12, min_reduce_entity = 1, min_redue_action = 1;
+int timestep_size = -1;    // number of timesteps
 int *vocab_hash_entity, *vocab_hash_action;
 long long vocab_max_size_entity = 10000, vocab_max_size_action = 10000;
 long long vocab_size_entity = 0, vocab_size_action = 0, layer1_size = 0;
 long long train_entity = 0, train_action = 0;
 long long train_behavior = 0, behavior_count_actual = 0, iter = 5, file_size = 0, classes = 0;
+long long min_time = INT64_MAX, max_time = INT64_MIN;   // upper bound and lower bound of time
 real alpha = 0.025, starting_alpha, sample = 1e-3;
-real *syn0_entity, *syn1_entity, *syn1neg_entity;
-real *syn0_action, *syn1_action, *syn1neg_action;
+real *syn0_entity = NULL, *syn1_entity = NULL, *syn1neg_entity = NULL;
+real *syn0_action = NULL, *syn1_action = NULL, *syn1neg_action = NULL;
 real *expTable;
 clock_t start;
+
+
+real *w_entity, *w_action;    // projection matrix for entity and action
 
 int hs = 0, negative = 5;
 const int table_size = 1e8;
@@ -73,6 +80,19 @@ int* InitUnigramTable(struct vocab_word *vocab, long long vocab_size) {
 		if (i >= vocab_size) i = vocab_size - 1;
 	}
 	return table;
+}
+
+void UpdateTimeBound(long long time) {
+  max_time = time > max_time ? time: max_time;
+  min_time = time < min_time ? time: min_time;
+}
+
+void NormalizeW(real *w_local) {
+  int a;
+  real w_sum = 0;
+  for (a = 0; a < layer1_size; a++) w_sum += w_local[a] * w_local[a];
+  w_sum = sqrt(w_sum + 1e-9);
+  for (a = 0; a < layer1_size; a++) w_local[a] /= (w_sum);
 }
 
 // Reads a single word from a file, assuming space + tab + EOL to be word boundaries
@@ -287,7 +307,7 @@ long long Split(char *buffer, long long *content) {
 void LearnVocabFromTrainFile() {
 	FILE *fin;
 	long long a, i, j, n;
-	long long entity, action;
+	long long entity, action, time;
 	long long *content = (long long *)calloc(MAX_RW_LENGTH * 2 + 1, sizeof(long long));
 	char *buffer = (char*)calloc(MAX_RW_LINE_LENGTH, sizeof(char));
 	for (a = 0; a < vocab_hash_size; a++) {
@@ -309,20 +329,24 @@ void LearnVocabFromTrainFile() {
 		n = Split(buffer, content);
 		//printf("%d\n", n);
 		if (!n) continue;
-		if (n%2==1) {
+		if (n%3 != 0) {
 			printf("ERROR: training data file wrong format!\n");
 			exit(1);
 		}
-		for (j=0; j<n; j+=2) {
+		for (j = 0; j < n; j += 3) {
 			entity = content[j];
-			action = content[j+1];
+			action = content[j + 1];
+      time = content[j + 2];
 			train_entity++;
 			train_action++;
 			if ((debug_mode > 1) && (train_entity % 100000 == 0)) {
-				printf("%lldK%c", train_entity / 1000, 13);
+				printf("%lldK\n", train_entity / 1000);
 				fflush(stdout);
 			}
-			// add entity to vocab_entity
+
+      UpdateTimeBound(time);
+
+      // add entity to vocab_entity
 			i = SearchVocab(vocab_entity, vocab_hash_entity, entity);
 			if (i == -1) {
 				a = AddWordToVocab(vocab_entity, vocab_hash_entity, &vocab_size_entity, &vocab_max_size_entity, entity);
@@ -341,21 +365,17 @@ void LearnVocabFromTrainFile() {
 			} else vocab_action[i].cn++;
 			if (vocab_size_action > vocab_hash_size * 0.7)
 				ReduceVocab(vocab_action, vocab_hash_action, &vocab_size_action, &train_action, &min_redue_action);
-
 		}
-		/*
-		   printf("Next behavior %p\n", (void*)&a);
-		   printf("vocab_size_entity=%lld train_entity=%lld vocab_max_size_entity=%lld\n", vocab_size_entity, train_entity, vocab_max_size_entity);
-		   printf("vocab_size_action=%lld train_action=%lld\n", vocab_size_action, train_action);
-		   */
 	}
 	SortVocab(vocab_entity, vocab_hash_entity, &vocab_size_entity, &train_entity);
 	SortVocab(vocab_action, vocab_hash_action, &vocab_size_action, &train_action);
+  if (timestep_size == -1) timestep_size = max_time - min_time;
 	if (debug_mode > 0) {
 		printf("Vocab_entity size : %lld\n", vocab_size_entity);
 		printf("Vocab_action size : %lld\n", vocab_size_action);
 		printf("Entity in train file: %lld\n", train_entity);
 		printf("Action in train file: %lld\n", train_action);
+    printf("Total timesteps from raw data: %lld\n", max_time - min_time);
 	}
 	train_behavior = train_entity;
 	file_size = ftell(fin);
@@ -365,50 +385,39 @@ void LearnVocabFromTrainFile() {
 	printf("LearnVocabFromTrainFile Completed\n");
 }
 
-/*
-   void SaveVocab() {
-   long long i;
-   FILE *fo = fopen(save_vocab_file, "wb");
-   for (i = 0; i < vocab_size; i++) fprintf(fo, "%s %lld\n", vocab[i].word, vocab[i].cn);
-   fclose(fo);
-   }
-   void ReadVocab() {
-   long long a, i = 0;
-   char c;
-   char word[MAX_STRING];
-   FILE *fin = fopen(read_vocab_file, "rb");
-   if (fin == NULL) {
-   printf("Vocabulary file not found\n");
-   exit(1);
-   }
-   for (a = 0; a < vocab_hash_size; a++) vocab_hash[a] = -1;
-   vocab_size = 0;
-   while (1) {
-   ReadWord(word, fin);
-   if (feof(fin)) break;
-   a = AddWordToVocab(word);
-   fscanf(fin, "%lld%c", &vocab[a].cn, &c);
-   i++;
-   }
-   SortVocab();
-   if (debug_mode > 0) {
-   printf("Vocab size: %lld\n", vocab_size);
-   printf("Words in train file: %lld\n", train_words);
-   }
-   fin = fopen(train_file, "rb");
-   if (fin == NULL) {
-   printf("ERROR: training data file not found!\n");
-   exit(1);
-   }
-   fseek(fin, 0, SEEK_END);
-   file_size = ftell(fin);
-   fclose(fin);
-   }
-   */
+
 void InitNet() {
 	printf("Entering InitNet\n");
 	long long a, b;
 	unsigned long long next_random = 1;
+
+  if (debug_mode > 2) {
+    printf("address of syn0_action: %x\n", syn0_action);
+    printf("address of vocab_action: %x\n", vocab_action);
+  }
+  posix_memalign((void **)&syn0_action, 128, (long long)vocab_size_action * layer1_size * sizeof(real));
+  if (syn0_action == NULL) {printf("Memory allocation failed\n"); exit(1);}
+  if (debug_mode > 2) {
+    printf("address of syn0_action: %x\n", syn0_action);
+    printf("address of vocab_action: %x\n", vocab_action);
+  }
+  if (hs) {
+    a = posix_memalign((void **)&syn1_action, 128, (long long)vocab_size_action * layer1_size * sizeof(real));
+    if (syn1_action == NULL) {printf("Memory allocation failed\n"); exit(1);}
+    for (a = 0; a < vocab_size_action; a++) for (b = 0; b < layer1_size; b++)
+        syn1_action[a * layer1_size + b] = 0;
+  }
+  if (negative>0) {
+    a = posix_memalign((void **)&syn1neg_action, 128, (long long)vocab_size_action * layer1_size * sizeof(real));
+    if (syn1neg_action == NULL) {printf("Memory allocation failed\n"); exit(1);}
+    for (a = 0; a < vocab_size_action; a++) for (b = 0; b < layer1_size; b++)
+        syn1neg_action[a * layer1_size + b] = 0;
+  }
+  for (a = 0; a < vocab_size_action; a++) for (b = 0; b < layer1_size; b++) {
+      next_random = next_random * (unsigned long long)25214903917 + 11;
+      syn0_action[a * layer1_size + b] = (real)(((next_random & 0xFFFF) / (real)65536) - 0.5) / layer1_size;
+    }
+
 	a = posix_memalign((void **)&syn0_entity, 128, (long long)vocab_size_entity * layer1_size * sizeof(real));
 	if (syn0_entity == NULL) {printf("Memory allocation failed\n"); exit(1);}
 	if (hs) {
@@ -427,39 +436,54 @@ void InitNet() {
 		next_random = next_random * (unsigned long long)25214903917 + 11;
 		syn0_entity[a * layer1_size + b] = (((next_random & 0xFFFF) / (real)65536) - 0.5) / layer1_size;
 	}
-	a = posix_memalign((void **)&syn0_action, 128, (long long)vocab_size_action * layer1_size * sizeof(real));
-	if (syn0_action == NULL) {printf("Memory allocation failed\n"); exit(1);}
-	if (hs) {
-		a = posix_memalign((void **)&syn1_action, 128, (long long)vocab_size_action * layer1_size * sizeof(real));
-		if (syn1_action == NULL) {printf("Memory allocation failed\n"); exit(1);}
-		for (a = 0; a < vocab_size_action; a++) for (b = 0; b < layer1_size; b++)
-			syn1_action[a * layer1_size + b] = 0;
-	}
-	if (negative>0) {
-		a = posix_memalign((void **)&syn1neg_action, 128, (long long)vocab_size_action * layer1_size * sizeof(real));
-		if (syn1neg_action == NULL) {printf("Memory allocation failed\n"); exit(1);}
-		for (a = 0; a < vocab_size_action; a++) for (b = 0; b < layer1_size; b++)
-			syn1neg_action[a * layer1_size + b] = 0;
-	}
-	for (a = 0; a < vocab_size_action; a++) for (b = 0; b < layer1_size; b++) {
-		next_random = next_random * (unsigned long long)25214903917 + 11;
-		syn0_action[a * layer1_size + b] = (((next_random & 0xFFFF) / (real)65536) - 0.5) / layer1_size;
-	}
-	printf("Completed InitNet\n");
+
+
+  // allocate memory for w
+  a = posix_memalign((void **)&w_entity, 128, (long long)timestep_size * layer1_size * sizeof(real));
+  if (w_entity == NULL) {printf("Memory allocation failed\n"); exit(1);}
+  a = posix_memalign((void **)&w_action, 128, (long long)timestep_size * layer1_size * sizeof(real));
+  if (w_action == NULL) {printf("Memory allocation failed\n"); exit(1);}
+
+  // initialize w with random numbers
+  for (a = 0; a < timestep_size; a++) {
+    for (b = 0; b < layer1_size; b++) {
+      next_random = next_random * (unsigned long long) 25214903917 + 11;
+      w_entity[a * layer1_size + b] = (((next_random & 0xFFFF) / (real) 65536) - 0.5) / layer1_size;
+      next_random = next_random * (unsigned long long) 25214903917 + 11;
+      w_action[a * layer1_size + b] = (((next_random & 0xFFFF) / (real) 65536) - 0.5) / layer1_size;
+    }
+    NormalizeW(w_entity + a * layer1_size);
+    NormalizeW(w_action + a * layer1_size);
+  }
+
+  if (debug_mode > 1) {
+    printf("Completed InitNet\n");
+  }
 	CreateBinaryTree(vocab_entity, vocab_size_entity);
 	CreateBinaryTree(vocab_action, vocab_size_action);
-	printf("Completed CreateBinaryTree\n");
+  if (debug_mode > 1) {
+    printf("Completed CreateBinaryTree\n");
+  }
 }
 
 void *TrainModelThread(void *id) {
-	long long a, b, d, cw, entity, action, word, last_word, sentence_length = 0, sentence_position = 0;
+	long long a, b, d, cw, entity, action, time, word, last_word, sentence_length = 0, sentence_position = 0;
 	long long behavior_count = 0, last_behavior_count = 0;
 	long long l1, l2, c, target, label, local_iter = iter;
 	unsigned long long next_random = (long long)id;
+  real m_ti, m_tj, m_si, m_sj, m_ts;              // variables to store temp values
+  long long t, s;
+
 	real f, g;
 	clock_t now;
 	real *neu1 = (real *)calloc(layer1_size, sizeof(real));
 	real *neu1e = (real *)calloc(layer1_size, sizeof(real));
+  real *wt_e = (real *)calloc(layer1_size, sizeof(real));     // error propagation variable for wt
+  real *ws_e = (real *)calloc(layer1_size, sizeof(real));     // error propagation variable for ws
+  real *wt_action = (real *)calloc(layer1_size, sizeof(real));
+  real *ws_action = (real *)calloc(layer1_size, sizeof(real));
+  real *wt_entity = (real *)calloc(layer1_size, sizeof(real));
+  real *ws_entity = (real *)calloc(layer1_size, sizeof(real));
 	FILE *fi = fopen(train_file, "rb");
 	char* buffer = (char *)calloc(MAX_RW_LINE_LENGTH, sizeof(char));
 	long long *content = (long long *)calloc(MAX_RW_LENGTH * 2 + 1, sizeof(long long));
@@ -468,10 +492,11 @@ void *TrainModelThread(void *id) {
 	long long *sen = (long long *)calloc(MAX_RW_LENGTH * 2, sizeof(long long));
 	long long n, i;
 	long long input_is_action, output_is_action;
-	fseek(fi, file_size / (long long)num_threads * (long long)id, SEEK_SET);
+	fseek(fi, file_size / (long long)num_threads * (long long)id, SEEK_SET);    // how to guarantee fi points to entity ?
 	fgets(buffer, MAX_RW_LINE_LENGTH, fi);
 	if (debug_mode > 0) printf("thread %d\n", id);
 	while (1) {
+    // display progress
 		if (behavior_count - last_behavior_count> 10000) {
 			behavior_count_actual += behavior_count - last_behavior_count;
 			last_behavior_count = behavior_count;
@@ -485,27 +510,34 @@ void *TrainModelThread(void *id) {
 			alpha = starting_alpha * (1 - behavior_count_actual / (real)(iter * train_entity + 1));
 			if (alpha < starting_alpha * 0.0001) alpha = starting_alpha * 0.0001;
 		}
+    // build sentence
 		if (sentence_length == 0 && fgets(buffer, MAX_RW_LINE_LENGTH, fi) != NULL) {
 			size_t len = strlen(buffer);
 			if (len>0 && buffer[len-1]=='\n') buffer[len-1] = '\0';
 			n = Split(buffer, content);
-			if (n % 2 == 1) {
-				for (i=1; i<n; ++i) content[i-1] = content[i];
-				--n;
+			if (n % 3 != 0) {
+				printf("wrong format!");
+        exit(1);
 			}
 			sen[0] = -1;
-			for (i=0; i<n; i+=2) {
+      // content[] starts at entity
+			for (i=0; i<n; i += 3) {
 				entity = SearchVocab(vocab_entity, vocab_hash_entity, content[i]);
 				if (entity == -1) continue;
-				action = SearchVocab(vocab_action, vocab_hash_action, content[i+1]);
+				action = SearchVocab(vocab_action, vocab_hash_action, content[i + 1]);
 				if (action == -1) continue;
+        time = content[i + 2];
 				sen[sentence_length++] = entity;
 				sen[sentence_length++] = action;
+        sen[sentence_length++] = time;
+        // sentence_length is set to be multiple of 4, so that judging an item is entity or action or time can be done
+        // efficiently using bit operation
+        sentence_length++;
 			}
-			behavior_count += sentence_length/2;
+			behavior_count += sentence_length / 4;
 			sentence_position = 0;
 			if (debug_mode > 2) {
-				printf("new sentence with length=%lld behavior_count=%lld\n", sentence_length, behavior_count);
+				printf("new sentence with length=%lld behavior_count=%lld n=%lld\n", sentence_length, behavior_count, n);
 			}
 		}
 		if (feof(fi) || (behavior_count > train_behavior / num_threads + 100)) {
@@ -522,8 +554,22 @@ void *TrainModelThread(void *id) {
 			continue;
 		}
 		word = sen[sentence_position];
+    if (sentence_position % 4 == 0)
+      s = sen[sentence_position + 2];
+    else if (sentence_position % 4 == 1)
+      s = sen[sentence_position + 1];
+    else
+      printf("Alignment error");
+    // Copy ws from matrix w
+    for (c = 0; c < layer1_size; c++) {
+      ws_entity[c] = w_entity[c + s];
+      ws_action[c] = w_action[c + s];
+    }
+    NormalizeW(ws_entity);
+    NormalizeW(ws_action);
+
 		if (debug_mode > 2) {
-			printf("sentence_position=%d word=%lld is_entity=%lld\n", sentence_position, word);
+			printf("sentence_position(output)=%d word=%lld s=%lld\n", sentence_position, word, s);
 		}
 		if (word == -1) continue;
 		for (c = 0; c < layer1_size; c++) neu1[c] = 0;
@@ -650,69 +696,191 @@ void *TrainModelThread(void *id) {
 			}
 		} else {  //train skip-gram
 			for (a = b; a < window * 2 + 1 - b; a++) if (a != window) {
-				c = sentence_position - window + a;
-				//input c output at sentence_position
-				if (c < 0) continue;
-				if (c >= sentence_length) continue;
-				last_word = sen[c];
-				l1 = last_word * layer1_size;
-				input_is_action = c & 1;
-				output_is_action = sentence_position & 1;
-				for (c = 0; c < layer1_size; c++) neu1e[c] = 0;
-				// HIERARCHICAL SOFTMAX
-				if (hs) {
-					// For entity
-					if (!output_is_action) {
-						for (d = 0; d < vocab_entity[word].codelen; d++) {
-							f = 0;
-							l2 = vocab_entity[word].point[d] * layer1_size;
-							// Propagate hidden -> output
-							if (!input_is_action) {
-								for (c = 0; c < layer1_size; c++) f += syn0_entity[c + l1] * syn1_entity[c + l2];
-							} else {
-								for (c = 0; c < layer1_size; c++) f += syn0_action[c + l1] * syn1_entity[c + l2];
-							}
-							if (f <= -MAX_EXP) continue;
-							else if (f >= MAX_EXP) continue;
-							else f = expTable[(int)((f + MAX_EXP) * (EXP_TABLE_SIZE / MAX_EXP / 2))];
-							// 'g' is the gradient multiplied by the learning rate
-							g = (1 - vocab_entity[word].code[d] - f) * alpha;
-							// Propagate errors output -> hidden
-							for (c = 0; c < layer1_size; c++) neu1e[c] += g * syn1_entity[c + l2];
-							// Learn weights hidden -> output
-							if (!input_is_action) {
-								for (c = 0; c < layer1_size; c++) syn1_entity[c + l2] += g * syn0_entity[c + l1];
-							} else {
-								for (c = 0; c < layer1_size; c++) syn1_entity[c + l2] += g * syn0_action[c + l1];
-							}
-						}
-					} else {
-						// For action
-						for (d = 0; d < vocab_action[word].codelen; d++) {
-							f = 0;
-							l2 = vocab_action[word].point[d] * layer1_size;
-							// Propagate hidden -> output
-							if (!input_is_action) {
-								for (c = 0; c < layer1_size; c++) f += syn0_entity[c + l1] * syn1_action[c + l2];
-							} else {
-								for (c = 0; c < layer1_size; c++) f += syn0_action[c + l1] * syn1_action[c + l2];
-							}
-							if (f <= -MAX_EXP) continue;
-							else if (f >= MAX_EXP) continue;
-							else f = expTable[(int)((f + MAX_EXP) * (EXP_TABLE_SIZE / MAX_EXP / 2))];
-							// 'g' is the gradient multiplied by the learning rate
-							g = (1 - vocab_action[word].code[d] - f) * alpha;
-							// Propagate errors output -> hidden
-							for (c = 0; c < layer1_size; c++) neu1e[c] += g * syn1_action[c + l2];
-							// Learn weights hidden -> output
-							if (!input_is_action) {
-								for (c = 0; c < layer1_size; c++) syn1_action[c + l2] += g * syn0_entity[c + l1];
-							} else {
-								for (c = 0; c < layer1_size; c++) syn1_action[c + l2] += g * syn0_action[c + l1];
-							}
-						}
+          c = sentence_position - window + a;
+          //input c output at sentence_position
+          if (c < 0) continue;
+          if (c >= sentence_length) continue;
+          if (c % 4 == 3 || c % 4 == 2) continue;
+          last_word = sen[c];
+          l1 = last_word * layer1_size;
+          input_is_action = (c % 4) == 1;
+          output_is_action = (sentence_position % 4) == 1;
+          if (input_is_action)
+            t = sen[c + 1];
+          else
+            t = sen[c + 2];
+
+          if (debug_mode > 2) {
+            printf("input position: %lld, output position: %lld, t: %lld, s: %lld\n", c, sentence_position, t, s);
+            printf("input word: %lld, output word: %lld, input_action: %d, output action: %d\n", last_word, word, input_is_action, output_is_action);
+          }
+
+          // Copy ws from matrix w
+          for (c = 0; c < layer1_size; c++) {
+            wt_entity[c] = w_entity[c + t];
+            wt_action[c] = w_action[c + t];
+          }
+          NormalizeW(wt_entity);
+          NormalizeW(wt_action);
+
+
+
+          for (c = 0; c < layer1_size; c++) neu1e[c] = wt_e[c] = ws_e[c] = 0;
+          // HIERARCHICAL SOFTMAX
+          if (hs) {
+            // For out: entity
+            if (!output_is_action) {
+              for (d = 0; d < vocab_entity[word].codelen; d++) {
+                f = 0;
+                m_si = m_sj = m_ti = m_tj = 0;
+                l2 = vocab_entity[word].point[d] * layer1_size;
+                // Propagate hidden -> output
+                if (!input_is_action) {   // in: entity, out: entity
+                  for (c = 0; c < layer1_size; c++) {
+                    f += syn0_entity[c + l1] * syn1_entity[c + l2];
+                    m_ti += wt_entity[c] * syn0_entity[c + l1];
+                    m_tj += wt_entity[c] * syn1_entity[c + l2];
+                    m_si += ws_entity[c] * syn0_entity[c + l1];
+                    m_sj += ws_entity[c] * syn1_entity[c + l2];
+                    m_ts += ws_entity[c] * wt_entity[c];
+                  }
+                } else {    // in: action, out: entity
+                  for (c = 0; c < layer1_size; c++) {
+                    f += syn0_action[c + l1] * syn1_entity[c + l2];
+                    m_ti += wt_entity[c] * syn0_action[c + l1];
+                    m_tj += wt_entity[c] * syn1_entity[c + l2];
+                    m_si += ws_entity[c] * syn0_action[c + l1];
+                    m_sj += ws_entity[c] * syn1_entity[c + l2];
+                    m_ts += ws_entity[c] * wt_entity[c];
+                  }
+                }
+                f += - m_ti * m_tj - m_si * m_sj + m_ts * m_ti * m_sj;
+                if (f <= -MAX_EXP) continue;
+                else if (f >= MAX_EXP) continue;
+                else f = expTable[(int)((f + MAX_EXP) * (EXP_TABLE_SIZE / MAX_EXP / 2))];
+                // 'g' is the gradient multiplied by the learning rate
+                g = (1 - vocab_entity[word].code[d] - f) * alpha;
+                // Propagate errors output -> hidden
+                if (!input_is_action) {   // in: entity, out: entity
+                  for (c = 0; c < layer1_size; c++) {
+                    neu1e[c] += g * (syn1_entity[c + l2] - m_tj * wt_entity[c] - m_sj * ws_entity[c] + m_ts * m_sj * wt_entity[c]);
+                  }
+                } else {    // in: action, out: entity
+                  for (c = 0; c < layer1_size; c++) {
+                    neu1e[c] += g * (syn1_entity[c + l2] - m_tj * wt_action[c] - m_sj * ws_entity[c] + m_ts * m_sj * wt_action[c]);
+                  }
+                }
+                // Propagate errors wt, ws
+                if (s == t) {
+                  if (!input_is_action) { // in: entity, out: entity
+                    for (c = 0; c < layer1_size; c++) {
+                      wt_e[c] += -g * (m_ti * syn1_entity[c + l2] + m_tj * syn0_entity[c + l1]);
+                    }
+                  } else {  // in: action, out: entity
+                    for (c = 0; c < layer1_size; c++) {
+                      wt_e[c] += -g * (m_ti * syn1_entity[c + l2] + m_tj * syn0_action[c + l1]);
+                    }
+                  }
+                } else {
+                  if (!input_is_action) { // in: entity, out: entity
+                    for (c = 0; c < layer1_size; c++) {
+                      wt_e[c] += g * (m_sj * (m_ts * syn0_entity[c + l1] + m_ti * ws_entity[c]) - m_tj * syn0_entity[c + l1] - m_ti * syn1_entity[c + l1]);
+                      ws_e[c] += g * (m_ti * (m_ts * syn1_entity[c + l2] + m_sj * wt_entity[c]) - m_si * syn1_entity[c + l2] - m_sj * syn0_entity[c + l1]);
+                    }
+                  } else {  // in: action, out: entity
+                    for (c = 0; c < layer1_size; c++) {
+                      wt_e[c] += g * (m_sj * (m_ts * syn0_action[c + l1] + m_ti * ws_entity[c]) - m_tj * syn0_action[c + l1] - m_ti * syn1_entity[c + l1]);
+                      ws_e[c] += g * (m_ti * (m_ts * syn1_entity[c + l2] + m_sj * wt_action[c]) - m_si * syn1_entity[c + l2] - m_sj * syn0_action[c + l1]);
+                    }
+                  }
+                }
+
+                // Learn weights hidden -> output
+                if (!input_is_action) {   // in: entity, out: entity
+                  for (c = 0; c < layer1_size; c++)
+                    syn1_entity[c + l2] += g * (syn0_entity[c + l1] - m_ti * wt_entity[c] - m_si * ws_entity[c] + m_ti * m_ts * ws_entity[c]);
+                } else {
+                  for (c = 0; c < layer1_size; c++) // in: action, out: entity
+                    syn1_entity[c + l2] += g * (syn0_action[c + l1] - m_ti * wt_action[c] - m_si * ws_entity[c] + m_ti * m_ts * ws_entity[c]);
+                }
+              } // end enumerate Huffman tree
+            } else {
+              // For out: action
+              for (d = 0; d < vocab_action[word].codelen; d++) {
+                f = 0;
+                m_si = m_sj = m_ti = m_tj = 0;
+                l2 = vocab_action[word].point[d] * layer1_size;
+                // Propagate hidden -> output
+                if (!input_is_action) {   // in(wt, syn0): entity, out(ws, syn1): action
+                  for (c = 0; c < layer1_size; c++) {
+                    f += syn0_entity[c + l1] * syn1_action[c + l2];
+                    m_ti += wt_entity[c] * syn0_entity[c + l1];
+                    m_tj += wt_entity[c] * syn1_action[c + l2];
+                    m_si += ws_action[c] * syn0_entity[c + l1];
+                    m_sj += ws_action[c] * syn1_action[c + l2];
+                    m_ts += ws_action[c] * wt_entity[c];
+                  }
+                } else {
+                  for (c = 0; c < layer1_size; c++) {   // in(wt, syn0): action, out(ws, syn1): action
+                    f += syn0_action[c + l1] * syn1_action[c + l2];
+                    m_ti += wt_action[c] * syn0_action[c + l1];
+                    m_tj += wt_action[c] * syn1_action[c + l2];
+                    m_si += ws_action[c] * syn0_action[c + l1];
+                    m_sj += ws_action[c] * syn1_action[c + l2];
+                    m_ts += ws_action[c] * wt_action[c];
+                  }
+                }
+                f += - m_ti * m_tj - m_si * m_sj + m_ts * m_ti * m_sj;
+                if (f <= -MAX_EXP) continue;
+                else if (f >= MAX_EXP) continue;
+                else f = expTable[(int)((f + MAX_EXP) * (EXP_TABLE_SIZE / MAX_EXP / 2))];
+                // 'g' is the gradient multiplied by the learning rate
+                g = (1 - vocab_action[word].code[d] - f) * alpha;
+                // Propagate errors output -> hidden
+                if (!input_is_action) {   // in(wt, syn0): entity, out(ws, syn1): action
+                  for (c = 0; c < layer1_size; c++) {
+                    neu1e[c] += g * (syn1_action[c + l2] - m_tj * wt_entity[c] - m_sj * ws_action[c] + m_ts * m_sj * wt_entity[c]);
+                  }
+                } else {  // in(wt, syn0): action, out(ws, syn1): action
+                  for (c = 0; c < layer1_size; c++) {
+                    neu1e[c] += g * (syn1_action[c + l2] - m_tj * wt_action[c] - m_sj * ws_action[c] + m_ts * m_sj * wt_action[c]);
+                  }
+                }
+                // Propagate errors wt, ws
+                if (s == t) {
+                  if (!input_is_action) { // in(wt, syn0): entity, out(ws, syn1): action
+                    for (c = 0; c < layer1_size; c++) {
+                      wt_e[c] += -g * (m_ti * syn1_action[c + l2] + m_tj * syn0_entity[c + l1]);
+                    }
+                  } else {  // in(wt, syn0): action, out(ws, syn1): action
+                    for (c = 0; c < layer1_size; c++) {
+                      wt_e[c] += -g * (m_ti * syn1_action[c + l2] + m_tj * syn0_action[c + l1]);
+                    }
+                  }
+                } else {
+                  if (!input_is_action) { // in(wt, syn0): entity, out(ws, syn1): action
+                    for (c = 0; c < layer1_size; c++) {
+                      wt_e[c] += g * (m_sj * (m_ts * syn0_entity[c + l1] + m_ti * ws_action[c]) - m_tj * syn0_entity[c + l1] - m_ti * syn1_action[c + l1]);
+                      ws_e[c] += g * (m_ti * (m_ts * syn1_action[c + l2] + m_sj * wt_entity[c]) - m_si * syn1_action[c + l2] - m_sj * syn0_entity[c + l1]);
+                    }
+                  } else {  // in(wt, syn0): action, out(ws, syn1): action
+                    for (c = 0; c < layer1_size; c++) {
+                      wt_e[c] += g * (m_sj * (m_ts * syn0_action[c + l1] + m_ti * ws_action[c]) - m_tj * syn0_action[c + l1] - m_ti * syn1_action[c + l1]);
+                      ws_e[c] += g * (m_ti * (m_ts * syn1_action[c + l2] + m_sj * wt_action[c]) - m_si * syn1_action[c + l2] - m_sj * syn0_action[c + l1]);
+                    }
+                  }
+                }
+                // Learn weights hidden -> output
+                if (!input_is_action) {   // in(wt, syn0): entity, out(ws, syn1): action
+                  for (c = 0; c < layer1_size; c++)
+                    syn1_action[c + l2] += g * (syn0_entity[c + l1] - m_ti * wt_entity[c] - m_si * ws_action[c] + m_ti * m_ts * ws_action[c]);
+                } else {  // in(wt, syn0): action, out(ws, syn1): action
+                  for (c = 0; c < layer1_size; c++)
+                    syn1_action[c + l2] += g * (syn0_action[c + l1] - m_ti * wt_action[c] - m_si * ws_action[c] + m_ti * m_ts * ws_action[c]);
+                }
+              } // end enumerate Huffman tree
 					}
-				}
+				}   // end HIERARCHICAL SOFTMAX
 				// NEGATIVE SAMPLING
 				if (negative > 0) {
 					// For entity
@@ -776,15 +944,35 @@ void *TrainModelThread(void *id) {
 						}
 					}
 				}
-				// Learn weights input -> hidden
-				if (!input_is_action) {
-					for (c = 0; c < layer1_size; c++) syn0_entity[c + l1] += neu1e[c];
-				} else {
-					for (c = 0; c < layer1_size; c++) syn0_action[c + l1] += neu1e[c];
+				// Learn weights input -> hidden, wt
+				if (!input_is_action) {   // in(wt, syn0): entity, out(ws, syn1): ?
+					for (c = 0; c < layer1_size; c++) {
+            syn0_entity[c + l1] += neu1e[c];
+            w_entity[c + t] += wt_e[c];
+          }
+				} else {  // in(wt, syn0): action, out(ws, syn1): ?
+					for (c = 0; c < layer1_size; c++) {
+            syn0_action[c + l1] += neu1e[c];
+            w_action[c + t] += wt_e[c];
+          }
 				}
-			}
-		}
+        // Learn ws
+        if (s != t) { // perheps this if is not necessary, as ws_e will be 0 if s != t
+          if (!output_is_action) {  // in: ?, out: entity
+            for (c = 0; c < layer1_size; c++) {
+              w_entity[c + s] += ws_e[c];
+            }
+          } else {
+            for (c = 0; c < layer1_size; c++) {
+              w_action[c + s] += ws_e[c];
+            }
+          }
+        } // end if s != t
+			} // end enumerate input
+		} // end skip-gram
 		sentence_position++;
+    if (sentence_position % 4 == 3) sentence_position++;
+    else if (sentence_position % 4 == 2) sentence_position++;
 		if (sentence_position >= sentence_length) {
 			sentence_length = 0;
 			continue;
@@ -807,6 +995,8 @@ void TrainModel() {
 	LearnVocabFromTrainFile();
 	if (output_file_entity[0] == 0) return;
 	if (output_file_action[0] == 0) return;
+  if (output_file_entity_time[0] == 0) return;
+  if (output_file_action_time[0] == 0) return;
 	InitNet();
 	if (negative > 0) {
 		table_entity = InitUnigramTable(vocab_entity, vocab_size_entity);
@@ -908,17 +1098,21 @@ int main(int argc, char **argv) {
 	if ((i = ArgPos((char *)"-alpha", argc, argv)) > 0) alpha = atof(argv[i + 1]);
 	if ((i = ArgPos((char *)"-output_entity", argc, argv)) > 0) strcpy(output_file_entity, argv[i + 1]);
 	if ((i = ArgPos((char *)"-output_action", argc, argv)) > 0) strcpy(output_file_action, argv[i + 1]);
-	if ((i = ArgPos((char *)"-window", argc, argv)) > 0) window = atoi(argv[i + 1]);
+  if ((i = ArgPos((char *)"-output_entity_time", argc, argv)) > 0) strcpy(output_file_entity_time, argv[i + 1]);
+  if ((i = ArgPos((char *)"-output_action_time", argc, argv)) > 0) strcpy(output_file_action_time, argv[i + 1]);
+	if ((i = ArgPos((char *)"-window", argc, argv)) > 0) window = 2 * atoi(argv[i + 1]);
 	//  if ((i = ArgPos((char *)"-sample", argc, argv)) > 0) sample = atof(argv[i + 1]);
 	if ((i = ArgPos((char *)"-hs", argc, argv)) > 0) hs = atoi(argv[i + 1]);
 	if ((i = ArgPos((char *)"-negative", argc, argv)) > 0) negative = atoi(argv[i + 1]);
 	if ((i = ArgPos((char *)"-threads", argc, argv)) > 0) num_threads = atoi(argv[i + 1]);
 	if ((i = ArgPos((char *)"-iter", argc, argv)) > 0) iter = atoi(argv[i + 1]);
 	if ((i = ArgPos((char *)"-min-count", argc, argv)) > 0) min_count = atoi(argv[i + 1]);
+  if ((i = ArgPos((char *)"-timestep", argc, argv)) > 0) timestep_size = atoi(argv[i + 1]);
 	//  if ((i = ArgPos((char *)"-classes", argc, argv)) > 0) classes = atoi(argv[i + 1]);
 	vocab_entity = (struct vocab_word *)calloc(vocab_max_size_entity, sizeof(struct vocab_word));
 	vocab_hash_entity = (int *)calloc(vocab_hash_size, sizeof(int));
-	vocab_action= (struct vocab_word *)calloc(vocab_max_size_action, sizeof(struct vocab_word));
+	vocab_action = (struct vocab_word *)calloc(vocab_max_size_action, sizeof(struct vocab_word));
+  if (debug_mode > 1) printf("address of vocab_action: %x\n", vocab_action);
 	vocab_hash_action= (int *)calloc(vocab_hash_size, sizeof(int));
 	expTable = (real *)malloc((EXP_TABLE_SIZE + 1) * sizeof(real));
 	for (i = 0; i < EXP_TABLE_SIZE; i++) {
